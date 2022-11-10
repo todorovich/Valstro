@@ -9,7 +9,6 @@ import org.json.JSONObject;
 
 import java.net.URI;
 import java.util.Arrays;
-import java.util.Map;
 import java.util.Scanner;
 
 import org.slf4j.Logger;
@@ -17,7 +16,7 @@ import org.slf4j.LoggerFactory;
 
 public class Main
 {
-    private static Logger logger = LoggerFactory.getLogger(Main.class);
+    private static final Logger logger = LoggerFactory.getLogger(Main.class);
 
     private static final Emitter.Listener onConnect = new Emitter.Listener() {
         @Override
@@ -49,19 +48,36 @@ public class Main
                 {
                     try
                     {
-                        logger.info(jsonObject.getString("name"));
+                        int page = jsonObject.getInt("page");
+                        int resultCount = jsonObject.getInt("resultCount");
 
-                        String[] films = jsonObject.getString("films").split(",");
-
-                        for (String film : films)
+                        if (page == -1 && page == resultCount)
                         {
-                            logger.info(" - " + film.trim());
-                        }
-                        logger.info("");
+                            try {
+                                logger.error(jsonObject.getString("error"));
+                            } catch (JSONException e) {
+                                logger.error("Unexpected error received: " + Arrays.toString(args));
+                            }
 
-                        if (jsonObject.getInt("page") == jsonObject.getInt("resultCount")) {
                             synchronized (mainThread) {
                                 mainThread.notify();
+                            }
+                        }
+                        else {
+
+                            logger.info("[" + page + "/" + resultCount + "] " + jsonObject.getString("name"));
+
+                            String[] films = jsonObject.getString("films").split(",");
+
+                            for (String film : films) {
+                                logger.info(" - " + film.trim());
+                            }
+                            logger.info("");
+
+                            if (page == resultCount) {
+                                synchronized (mainThread) {
+                                    mainThread.notify();
+                                }
                             }
                         }
                     }
@@ -81,7 +97,15 @@ public class Main
     private static final Emitter.Listener onError = new Emitter.Listener() {
         @Override
         public void call(Object... args) {
-            logger.error("onError received:" + Arrays.toString(args));
+            if (args[0] instanceof JSONObject jsonObject)
+            {
+                try {
+                    logger.error(jsonObject.getString("error"));
+                } catch (JSONException e) {
+                    logger.error("Unexpected error received: " + Arrays.toString(args));
+                }
+            }
+
             synchronized (mainThread) {
                 mainThread.notify();
             }
@@ -105,10 +129,8 @@ public class Main
         URI uri = URI.create("http://0.0.0.0:3000");
 
         IO.Options options = IO.Options.builder()
-                .setTransports(new String[] {WebSocket.NAME})
-                //.setQuery("{query: \"Luke\"}")
-                //.setPath("/api/people/")
-                .build();
+            .setTransports(new String[] {WebSocket.NAME})
+            .build();
 
         Socket socket = null;
         try {
@@ -133,21 +155,20 @@ public class Main
             boolean exit = false;
             do
             {
-                logger.info("Please Choose:\n1.) search people\n2.) exit");
+                logger.info("Please Choose a number:\n1.) Search people\n2.) Exit");
 
                 Scanner scanner = new Scanner(System.in);
 
                 String consoleInput = scanner.nextLine();
 
-                if (consoleInput.equalsIgnoreCase("1") || consoleInput.equalsIgnoreCase("search"))
+                if (consoleInput.equalsIgnoreCase("1") || consoleInput.equalsIgnoreCase("s"))
                 {
-                    logger.info("What is your query?");
+                    logger.info("What name would you like to search for?");
                     scanner = new Scanner(System.in);
                     consoleInput = scanner.nextLine();
 
                     JSONObject object = new JSONObject();
                     object.put("query", consoleInput);
-                    String json = object.toString();
                     socket.emit("search", object);
 
                     synchronized (mainThread) {
@@ -155,7 +176,10 @@ public class Main
                     }
                 }
 
-                else if(consoleInput.equalsIgnoreCase("2") || consoleInput.equalsIgnoreCase("exit"))
+                else if(
+                    consoleInput.equalsIgnoreCase("2") ||
+                    consoleInput.equalsIgnoreCase("e")
+                )
                     exit = true;
 
             } while (!exit);
@@ -172,7 +196,6 @@ public class Main
             {
                 socket.disconnect();
                 socket.off();
-                socket = null;
             }
 
             logger.info("Disconnected from the server.");
